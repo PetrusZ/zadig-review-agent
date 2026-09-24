@@ -126,7 +126,7 @@ Rules are declarative JSON data and cannot execute code. They are loaded in this
 3. `~/.zadig-review/rules.json`
 4. embedded system rules
 
-See [.zadig-review/rules.example.json](.zadig-review/rules.example.json) and [.zadig-review/docs/go-review.md](.zadig-review/docs/go-review.md). Check the resolved rule for a path with:
+Each rule may have a `name`. Multiple rules in the highest-priority matching rule file can apply to the same path. If several rules report the same issue, the result contains one finding listing all applicable rules. Unattributed findings are retained. Built-in rules are named too. See [.zadig-review/rules.example.json](.zadig-review/rules.example.json) and [.zadig-review/docs/go-review.md](.zadig-review/docs/go-review.md). Check all resolved rules for a path with:
 
 ```bash
 zadig-review-agent rules check internal/reviewer/reviewer.go

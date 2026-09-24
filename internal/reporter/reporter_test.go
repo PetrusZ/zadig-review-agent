@@ -67,6 +67,32 @@ func TestJSONIncludesEmptyCompressions(t *testing.T) {
 	}
 }
 
+func TestReportsShowNamedAndUnattributedFindings(t *testing.T) {
+	report := agent.Report{
+		Findings: []agent.Finding{
+			{File: "main.go", Title: "multi", RuleID: "project:1", RuleName: "Go security", MatchedRules: []agent.FindingRule{{ID: "project:1", Name: "Go security"}, {ID: "project:2", Name: "Go style"}}},
+			{File: "main.go", Title: "named", RuleID: "project:2", RuleName: "Go style"},
+			{File: "main.go", Title: "unattributed"},
+		},
+		ResolvedRules: []agent.ResolvedRule{{File: "main.go", ID: "project:2", Name: "Go style", Source: "Project config", Pattern: "**/*.go"}},
+	}
+	md := Markdown(report)
+	console := ConsoleResult(report, "detailed")
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md, "Rules: Go security (`project:1`), Go style (`project:2`)") || !strings.Contains(md, "Rule: Go style (`project:2`)") || !strings.Contains(md, "Rule: unattributed") || !strings.Contains(md, "Go style (`project:2`), Project config") {
+		t.Fatalf("markdown rule attribution missing:\n%s", md)
+	}
+	if !strings.Contains(console, "Rules: Go security (project:1), Go style (project:2)") || !strings.Contains(console, "Rule: Go style (project:2)") || !strings.Contains(console, "Rule: unattributed") {
+		t.Fatalf("console rule attribution missing:\n%s", console)
+	}
+	if !strings.Contains(string(data), `"matched_rules":[{"rule_id":"project:1","rule_name":"Go security"},{"rule_id":"project:2","rule_name":"Go style"}]`) || !strings.Contains(string(data), `"name":"Go style"`) {
+		t.Fatalf("json rule attribution missing: %s", data)
+	}
+}
+
 func TestConsoleSummaryShowsIncompleteWarning(t *testing.T) {
 	report := agent.Report{
 		Incomplete: true,

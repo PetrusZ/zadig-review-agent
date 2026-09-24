@@ -363,8 +363,8 @@ func TestCodeCommentCategoryUsesClosedEnum(t *testing.T) {
 			t.Fatalf("category schema missing: %+v", findingProperties)
 		}
 		values, ok := category["enum"].([]any)
-		if !ok || len(values) != 6 {
-			t.Fatalf("category must use the six-value enum: %+v", category)
+		if !ok || len(values) != 7 {
+			t.Fatalf("category must use the seven-value enum: %+v", category)
 		}
 		findings, ok := properties["findings"].(map[string]any)
 		if !ok || findings["minItems"] != float64(1) || findings["maxItems"] != float64(10) {

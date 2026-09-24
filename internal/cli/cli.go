@@ -159,6 +159,12 @@ func runReview(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 		if err := writeReport(report, cfg.Output.JSON, cfg.Output.Markdown, stdout, cfg.Output.Console); err != nil {
 			return agent.ExitIncomplete, err
 		}
+		if cfg.Output.Console != "none" && stdout != nil && len(report.ResolvedRules) > 0 {
+			fmt.Fprintln(stdout, "Resolved rules:")
+			for _, rule := range report.ResolvedRules {
+				fmt.Fprintf(stdout, "- %s: %s (%s) [%s, %s]\n", rule.File, rule.Name, rule.ID, rule.Source, rule.Pattern)
+			}
+		}
 		return report.ExitCode, nil
 	}
 	if config.NeedsModelConfiguration(cfg) {
@@ -228,18 +234,19 @@ func runRules(args []string, stdout, stderr io.Writer) (int, error) {
 		fmt.Fprintf(stderr, "warning: %s\n", warning)
 	}
 	file := filepath.ToSlash(fs.Arg(0))
-	rule := resolver.Resolve(file)
 	fmt.Fprintf(stdout, "File: %s\n", file)
-	fmt.Fprintf(stdout, "Source: %s\n", rule.Source)
-	if rule.SourcePath != "" {
-		fmt.Fprintf(stdout, "SourcePath: %s\n", rule.SourcePath)
+	for index, rule := range resolver.ResolveAll(file) {
+		fmt.Fprintf(stdout, "Rule %d: %s (%s)\n", index+1, rule.Name, rule.ID)
+		fmt.Fprintf(stdout, "Source: %s\n", rule.Source)
+		if rule.SourcePath != "" {
+			fmt.Fprintf(stdout, "SourcePath: %s\n", rule.SourcePath)
+		}
+		fmt.Fprintf(stdout, "Pattern: %s\n", rule.Pattern)
+		fmt.Fprintf(stdout, "Digest: %s\n", rule.Digest)
+		fmt.Fprintln(stdout, "────────────────────────────────────────")
+		fmt.Fprintln(stdout, rule.Rule)
+		fmt.Fprintln(stdout, "────────────────────────────────────────")
 	}
-	fmt.Fprintf(stdout, "Pattern: %s\n", rule.Pattern)
-	fmt.Fprintf(stdout, "Digest: %s\n", rule.Digest)
-	fmt.Fprintln(stdout, "Rule:")
-	fmt.Fprintln(stdout, "────────────────────────────────────────")
-	fmt.Fprintln(stdout, rule.Rule)
-	fmt.Fprintln(stdout, "────────────────────────────────────────")
 	return agent.ExitOK, nil
 }
 
@@ -457,14 +464,17 @@ func previewReport(ctx context.Context, cfg config.Config, resolver rules.Resolv
 		report.Warnings = append(report.Warnings, fmt.Sprintf("sensitive_rename_precaution: skipped %d possible rename target(s)", len(blocked)))
 	}
 	for _, file := range filtered.Kept {
-		rule := resolver.Resolve(file.Path)
-		report.ResolvedRules = append(report.ResolvedRules, agent.ResolvedRule{
-			File:       file.Path,
-			Source:     rule.Source,
-			SourcePath: rule.SourcePath,
-			Pattern:    rule.Pattern,
-			Digest:     rule.Digest,
-		})
+		for _, rule := range resolver.ResolveAll(file.Path) {
+			report.ResolvedRules = append(report.ResolvedRules, agent.ResolvedRule{
+				File:       file.Path,
+				ID:         rule.ID,
+				Name:       rule.Name,
+				Source:     rule.Source,
+				SourcePath: rule.SourcePath,
+				Pattern:    rule.Pattern,
+				Digest:     rule.Digest,
+			})
+		}
 	}
 	return report, nil
 }

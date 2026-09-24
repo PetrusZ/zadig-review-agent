@@ -118,6 +118,14 @@ func ConsoleResult(report agent.Report, mode string) string {
 	for _, finding := range report.Findings {
 		fmt.Fprintf(&b, "\n─── %s:%d-%d ───\n", finding.File, finding.StartLine, finding.EndLine)
 		fmt.Fprintf(&b, "[%s · %s] **%s**\n\n", finding.Category, finding.Severity, finding.Title)
+		labels := findingRuleLabels(finding, false)
+		if len(labels) == 0 {
+			b.WriteString("Rule: unattributed\n\n")
+		} else if len(labels) == 1 {
+			fmt.Fprintf(&b, "Rule: %s\n\n", labels[0])
+		} else {
+			fmt.Fprintf(&b, "Rules: %s\n\n", strings.Join(labels, ", "))
+		}
 		fmt.Fprintf(&b, "%s\n", finding.Problem)
 		if finding.Evidence != "" {
 			fmt.Fprintf(&b, "\nEvidence: %s\n", finding.Evidence)
@@ -216,7 +224,14 @@ func Markdown(report agent.Report) string {
 			fmt.Fprintf(&b, "### [%s] %s\n\n", finding.Severity, finding.Title)
 			fmt.Fprintf(&b, "- Location: `%s:%d-%d`\n", finding.File, finding.StartLine, finding.EndLine)
 			fmt.Fprintf(&b, "- Category: `%s`\n", finding.Category)
-			fmt.Fprintf(&b, "- Rule: `%s`\n", finding.RuleID)
+			labels := findingRuleLabels(finding, true)
+			if len(labels) == 0 {
+				b.WriteString("- Rule: unattributed\n")
+			} else if len(labels) == 1 {
+				fmt.Fprintf(&b, "- Rule: %s\n", labels[0])
+			} else {
+				fmt.Fprintf(&b, "- Rules: %s\n", strings.Join(labels, ", "))
+			}
 			fmt.Fprintf(&b, "- Confidence: `%.2f`\n\n", finding.Confidence)
 			fmt.Fprintf(&b, "**Problem:** %s\n\n", finding.Problem)
 			fmt.Fprintf(&b, "**Evidence:** %s\n\n", finding.Evidence)
@@ -238,7 +253,7 @@ func Markdown(report agent.Report) string {
 	if len(report.ResolvedRules) > 0 {
 		b.WriteString("\n## Resolved Rules\n\n")
 		for _, rule := range report.ResolvedRules {
-			fmt.Fprintf(&b, "- `%s`: %s `%s` `%s`\n", rule.File, rule.Source, rule.Pattern, rule.Digest)
+			fmt.Fprintf(&b, "- `%s`: %s (`%s`), %s `%s` `%s`\n", rule.File, rule.Name, rule.ID, rule.Source, rule.Pattern, rule.Digest)
 		}
 	}
 	if len(report.ExcludedFiles) > 0 {
@@ -252,6 +267,22 @@ func Markdown(report agent.Report) string {
 		}
 	}
 	return b.String()
+}
+
+func findingRuleLabels(finding agent.Finding, markdown bool) []string {
+	matched := finding.MatchedRules
+	if len(matched) == 0 && finding.RuleName != "" {
+		matched = []agent.FindingRule{{ID: finding.RuleID, Name: finding.RuleName}}
+	}
+	labels := make([]string, 0, len(matched))
+	for _, rule := range matched {
+		if markdown {
+			labels = append(labels, fmt.Sprintf("%s (`%s`)", rule.Name, rule.ID))
+		} else {
+			labels = append(labels, fmt.Sprintf("%s (%s)", rule.Name, rule.ID))
+		}
+	}
+	return labels
 }
 
 func short(s string) string {

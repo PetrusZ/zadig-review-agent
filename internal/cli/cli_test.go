@@ -76,7 +76,7 @@ func TestCommandHelpExitsSuccessfully(t *testing.T) {
 func TestRulesCheck(t *testing.T) {
 	dir := t.TempDir()
 	rulePath := filepath.Join(dir, "rules.json")
-	if err := os.WriteFile(rulePath, []byte(`{"rules":[{"path":"src/**/*.go","rule":"custom go rule"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(rulePath, []byte(`{"rules":[{"name":"Go security","path":"src/**/*.go","rule":"custom go rule"},{"name":"Go style","path":"src/**/*.go","rule":"style rule"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -85,7 +85,7 @@ func TestRulesCheck(t *testing.T) {
 		t.Fatalf("code=%d err=%v stderr=%s", code, err, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Source: Custom (--rule)") || !strings.Contains(out, "Pattern: src/**/*.go") || !strings.Contains(out, "custom go rule") {
+	if !strings.Contains(out, "Source: Custom (--rule)") || !strings.Contains(out, "Pattern: src/**/*.go") || !strings.Contains(out, "custom go rule") || !strings.Contains(out, "Rule 1: Go security (custom:1)") || !strings.Contains(out, "Rule 2: Go style (custom:2)") {
 		t.Fatalf("unexpected rules check output:\n%s", out)
 	}
 }
@@ -118,7 +118,7 @@ func TestReviewPreviewDoesNotNeedModel(t *testing.T) {
 	git(t, "add", "main.go")
 	git(t, "commit", "-m", "change")
 	rulePath := filepath.Join(dir, "rules.json")
-	if err := os.WriteFile(rulePath, []byte(`{"rules":[{"path":"**/*.go","rule":"preview go rule"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(rulePath, []byte(`{"rules":[{"name":"Preview Go","path":"**/*.go","rule":"preview go rule"},{"name":"Preview style","path":"**/*.go","rule":"style checks"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir("nested", 0o700); err != nil {
@@ -138,6 +138,9 @@ func TestReviewPreviewDoesNotNeedModel(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "Code review:") || !strings.Contains(stdout.String(), "Review result: findings=0 status=complete") {
 		t.Fatalf("unexpected preview result output:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "main.go: Preview Go (custom:1)") || !strings.Contains(stdout.String(), "main.go: Preview style (custom:2)") {
+		t.Fatalf("preview console omitted named rules:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "Report dir:") || strings.Contains(stdout.String(), "JSON report:") || strings.Contains(stdout.String(), "Markdown report:") {
 		t.Fatalf("report paths must not be printed to the console:\n%s", stdout.String())
@@ -174,6 +177,9 @@ func TestReviewPreviewDoesNotNeedModel(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"llm_requests": 0`) || !strings.Contains(string(data), `"total_tokens": 0`) {
 		t.Fatalf("expected preview report to contain zero usage:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"name": "Preview Go"`) || !strings.Contains(string(data), `"name": "Preview style"`) {
+		t.Fatalf("preview did not include both named rules:\n%s", data)
 	}
 }
 

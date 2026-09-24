@@ -8,19 +8,27 @@ const (
 )
 
 type Finding struct {
-	Severity     string  `json:"severity"`
-	Category     string  `json:"category"`
-	RuleID       string  `json:"rule_id,omitempty"`
-	File         string  `json:"file"`
-	StartLine    int     `json:"start_line"`
-	EndLine      int     `json:"end_line"`
-	Title        string  `json:"title"`
-	Problem      string  `json:"problem"`
-	Evidence     string  `json:"evidence"`
-	Suggestion   string  `json:"suggestion"`
-	ExistingCode string  `json:"existing_code,omitempty"`
-	Confidence   float64 `json:"confidence"`
-	Fingerprint  string  `json:"fingerprint"`
+	Severity     string        `json:"severity"`
+	Category     string        `json:"category"`
+	RuleID       string        `json:"rule_id,omitempty"`
+	RuleIDs      []string      `json:"rule_ids,omitempty"`
+	RuleName     string        `json:"rule_name,omitempty"`
+	MatchedRules []FindingRule `json:"matched_rules,omitempty"`
+	File         string        `json:"file"`
+	StartLine    int           `json:"start_line"`
+	EndLine      int           `json:"end_line"`
+	Title        string        `json:"title"`
+	Problem      string        `json:"problem"`
+	Evidence     string        `json:"evidence"`
+	Suggestion   string        `json:"suggestion"`
+	ExistingCode string        `json:"existing_code,omitempty"`
+	Confidence   float64       `json:"confidence"`
+	Fingerprint  string        `json:"fingerprint"`
+}
+
+type FindingRule struct {
+	ID   string `json:"rule_id"`
+	Name string `json:"rule_name"`
 }
 
 type Report struct {
@@ -146,6 +154,8 @@ type Stats struct {
 
 type ResolvedRule struct {
 	File       string `json:"file"`
+	ID         string `json:"rule_id"`
+	Name       string `json:"name"`
 	Source     string `json:"source"`
 	SourcePath string `json:"source_path,omitempty"`
 	Pattern    string `json:"pattern"`

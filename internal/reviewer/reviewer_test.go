@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -317,12 +318,178 @@ func TestValidateFindingsNormalizesModelEnumVariants(t *testing.T) {
 		Severity: "Medium", Category: "Error Handling", File: "main.go",
 		StartLine: 10, EndLine: 10, Title: "lost context", Problem: "raw error returned",
 		Confidence: 0.9,
-	}}, file, rules.ResolvedRule{Source: "system", Pattern: "**/*.go"}, 0.75)
+	}}, file, []rules.ResolvedRule{{Source: "system", Pattern: "**/*.go"}}, 0.75)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(findings) != 1 || findings[0].Severity != "medium" || findings[0].Category != "correctness" {
 		t.Fatalf("model enum variants were not normalized: %+v", findings)
+	}
+}
+
+func TestValidateFindingsMapsRuleReferencesWithoutDroppingUnattributed(t *testing.T) {
+	file := reviewTestFile()
+	matched := []rules.ResolvedRule{
+		{ID: "project:1", Name: "Go security", Source: rules.SourceProject},
+		{ID: "project:2", Name: "Go style", Source: rules.SourceProject},
+	}
+	var candidates []agent.Finding
+	for _, ref := range []string{"R1", "R2", "unknown", ""} {
+		candidates = append(candidates, agent.Finding{
+			Severity: "low", Category: "style", RuleID: ref, RuleName: "untrusted model value",
+			File: file.Path, StartLine: 10, EndLine: 10, Title: "issue " + ref,
+			Problem: "problem", Evidence: "evidence", Suggestion: "suggestion", Confidence: 0.9,
+		})
+	}
+	got, err := validateFindings(candidates, file, matched, 0.75)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("findings were dropped: %+v, err=%v", got, err)
+	}
+	if got[0].RuleID != "project:1" || got[0].RuleName != "Go security" || len(got[0].MatchedRules) != 1 || got[1].RuleID != "project:2" || got[1].RuleName != "Go style" || len(got[1].MatchedRules) != 1 {
+		t.Fatalf("rule attribution mismatch: %+v", got)
+	}
+	for _, finding := range got[2:] {
+		if finding.RuleID != "" || finding.RuleName != "" || len(finding.MatchedRules) != 0 {
+			t.Fatalf("unattributed finding retained model metadata: %+v", finding)
+		}
+	}
+}
+
+func TestAggregateMergesRuleAttributionForSameIssue(t *testing.T) {
+	file := reviewTestFile()
+	matched := []rules.ResolvedRule{
+		{ID: "project:1", Name: "First rule"},
+		{ID: "project:2", Name: "Second rule"},
+	}
+	candidate := agent.Finding{Severity: "low", Category: "style", File: file.Path, StartLine: 10, EndLine: 10, Title: "same issue", Problem: "same problem", Confidence: 0.9}
+	first, second, unattributed := candidate, candidate, candidate
+	first.RuleID, second.RuleID, unattributed.RuleID = "R2", "R1", "invalid"
+	findings, err := validateFindings([]agent.Finding{first, second, unattributed, second}, file, matched, 0.75)
+	merged := aggregate(findings)
+	if err != nil || len(merged) != 1 || len(merged[0].MatchedRules) != 2 || merged[0].MatchedRules[0].ID != "project:1" || merged[0].MatchedRules[1].ID != "project:2" || merged[0].RuleID != "project:1" {
+		t.Fatalf("same issue did not merge both rule attributions: %+v err=%v", merged, err)
+	}
+}
+
+func TestAggregateKeepsHighestSeverityRegardlessOfOrder(t *testing.T) {
+	base := agent.Finding{File: "main.go", StartLine: 10, EndLine: 10, Category: "correctness", Title: "same issue", Problem: "same problem"}
+	base.Fingerprint = fingerprint(base)
+	low, high := base, base
+	low.Severity = "medium"
+	low.Evidence = "weaker evidence"
+	low.Suggestion = "weaker suggestion"
+	low.Confidence = 0.8
+	low.MatchedRules = []agent.FindingRule{{ID: "project:1", Name: "First rule"}}
+	high.Severity = "high"
+	high.Evidence = "stronger evidence"
+	high.Suggestion = "stronger suggestion"
+	high.Confidence = 0.95
+	high.MatchedRules = []agent.FindingRule{{ID: "project:2", Name: "Second rule"}}
+	for _, findings := range [][]agent.Finding{{low, high}, {high, low}} {
+		merged := aggregate(findings)
+		if len(merged) != 1 || merged[0].Severity != "high" || merged[0].Evidence != high.Evidence || merged[0].Suggestion != high.Suggestion || merged[0].Confidence != high.Confidence || len(merged[0].MatchedRules) != 2 || DecideExit(agent.Report{Findings: merged}, []string{"high"}) != agent.ExitBlocked {
+			t.Fatalf("duplicate severity depends on order: %+v", merged)
+		}
+	}
+}
+
+func TestValidateFindingAcceptsMultipleRuleReferences(t *testing.T) {
+	file := reviewTestFile()
+	matched := []rules.ResolvedRule{{ID: "project:1", Name: "First rule"}, {ID: "project:2", Name: "Second rule"}}
+	candidate := agent.Finding{Severity: "low", Category: "style", RuleIDs: []string{"R2", "invalid", "R1", "R1"}, File: file.Path, StartLine: 10, EndLine: 10, Title: "issue", Problem: "problem", Confidence: 0.9}
+	got, err := validateFindings([]agent.Finding{candidate}, file, matched, 0.75)
+	if err != nil || len(got) != 1 || len(got[0].MatchedRules) != 2 || got[0].MatchedRules[0].ID != "project:1" || got[0].MatchedRules[1].ID != "project:2" || len(got[0].RuleIDs) != 0 {
+		t.Fatalf("multiple rule references not normalized: %+v err=%v", got, err)
+	}
+}
+
+func TestRunnerReviewsTwoMatchingRulesTogether(t *testing.T) {
+	file := reviewTestFile()
+	cfg := config.Default()
+	cfg.Output.Language = "English"
+	findings := []agent.Finding{
+		{Severity: "high", Category: "correctness", RuleID: "R1", File: file.Path, StartLine: 10, EndLine: 10, ExistingCode: `panic("x")`, Title: "same issue", Problem: "problem", Evidence: "evidence", Suggestion: "suggestion", Confidence: 0.9},
+		{Severity: "high", Category: "correctness", RuleID: "R2", File: file.Path, StartLine: 10, EndLine: 10, ExistingCode: `panic("x")`, Title: "same issue", Problem: "problem", Evidence: "evidence", Suggestion: "suggestion", Confidence: 0.9},
+	}
+	arguments, _ := json.Marshal(map[string]any{"findings": findings})
+	llm := &recordingLLM{responses: []protocol.Response{{ToolCalls: []protocol.ToolCall{
+		{ID: "comment", Name: "code_comment", Arguments: string(arguments)},
+		{ID: "done", Name: "task_done", Arguments: `{}`},
+	}}, {Text: `[]`}}}
+	r := Runner{
+		Root: t.TempDir(), Config: cfg, Git: fakeGit{files: []gitdiff.FileDiff{file}},
+		DiffRequest: gitdiff.Request{Mode: gitdiff.ModeWorkspace}, LLM: llm,
+		RuleResolver: rules.Resolver{Layers: []rules.Layer{{Source: rules.SourceProject, File: rules.RuleFile{Rules: []rules.RuleEntry{
+			{Name: "Go security", Path: "**/*.go", Rule: "security checks"},
+			{Name: "Go style", Path: "**/*.go", Rule: "formatting checks"},
+		}}}}},
+	}
+	report, err := r.Run(context.Background())
+	if err != nil || report.Incomplete || len(report.Findings) != 1 || len(report.ResolvedRules) != 2 {
+		t.Fatalf("unexpected report: %+v err=%v", report, err)
+	}
+	if len(report.Findings[0].MatchedRules) != 2 || report.Findings[0].MatchedRules[0].Name != "Go security" || report.Findings[0].MatchedRules[1].Name != "Go style" || len(llm.requests) != 2 || !requestContains(llm.requests[0], `ref="R1"`) || !requestContains(llm.requests[0], `ref="R2"`) || !requestContains(llm.requests[1], `"id":"c-1"`) || !requestContains(llm.requests[1], `"rule_id":"project:1"`) || !requestContains(llm.requests[1], `"rule_id":"project:2"`) {
+		t.Fatalf("rules were not reviewed together: report=%+v requests=%+v", report, llm.requests)
+	}
+}
+
+func TestRunnerLocalizesMergedFindingOnce(t *testing.T) {
+	file := reviewTestFile()
+	findings := []agent.Finding{
+		{Severity: "high", Category: "correctness", RuleID: "R1", File: file.Path, StartLine: 10, EndLine: 10, ExistingCode: `panic("x")`, Title: "same issue", Problem: "same problem", Evidence: "same evidence", Suggestion: "same suggestion", Confidence: 0.9},
+		{Severity: "high", Category: "correctness", RuleID: "R2", File: file.Path, StartLine: 10, EndLine: 10, ExistingCode: `panic("x")`, Title: "same issue", Problem: "same problem", Evidence: "same evidence", Suggestion: "same suggestion", Confidence: 0.9},
+	}
+	arguments, _ := json.Marshal(map[string]any{"findings": findings})
+	llm := &recordingLLM{responses: []protocol.Response{
+		{ToolCalls: []protocol.ToolCall{{ID: "comment", Name: "code_comment", Arguments: string(arguments)}, {ID: "done", Name: "task_done", Arguments: `{}`}}},
+		{Text: `[]`},
+		{Text: `[{"id":"c-0","title":"相同问题","problem":"同一个问题。","evidence":"同一证据。","suggestion":"同一建议。"}]`},
+	}}
+	r := Runner{
+		Root: t.TempDir(), Config: config.Default(), Git: fakeGit{files: []gitdiff.FileDiff{file}},
+		DiffRequest: gitdiff.Request{Mode: gitdiff.ModeWorkspace}, LLM: llm,
+		RuleResolver: rules.Resolver{Layers: []rules.Layer{{Source: rules.SourceProject, File: rules.RuleFile{Rules: []rules.RuleEntry{
+			{Name: "First rule", Path: "**/*.go", Rule: "first checks"},
+			{Name: "Second rule", Path: "**/*.go", Rule: "second checks"},
+		}}}}},
+	}
+	report, err := r.Run(context.Background())
+	if err != nil || report.Incomplete || len(report.Findings) != 1 || len(report.Findings[0].MatchedRules) != 2 || len(llm.requests) != 3 {
+		t.Fatalf("localization separated duplicate findings: report=%+v err=%v requests=%d", report, err, len(llm.requests))
+	}
+	if report.Findings[0].Title != "相同问题" || report.Findings[0].MatchedRules[0].ID != "project:1" || report.Findings[0].MatchedRules[1].ID != "project:2" || !requestContains(llm.requests[1], `"id":"c-1"`) || requestContains(llm.requests[2], `"id":"c-1"`) {
+		t.Fatalf("localized finding lost rule attribution: %+v", report.Findings[0])
+	}
+}
+
+func TestRunnerFilterRetainsOnlySurvivingEvidenceAndRuleName(t *testing.T) {
+	file := reviewTestFile()
+	cfg := config.Default()
+	cfg.Output.Language = "English"
+	findings := []agent.Finding{
+		{Severity: "high", Category: "correctness", RuleID: "R1", File: file.Path, StartLine: 10, EndLine: 10, Title: "same issue", Problem: "same problem", Evidence: "the changed line returns nil", Suggestion: "return an error", Confidence: 0.9},
+		{Severity: "medium", Category: "correctness", RuleID: "R2", File: file.Path, StartLine: 10, EndLine: 10, Title: "same issue", Problem: "same problem", Evidence: "the changed line panics", Suggestion: "handle the error", Confidence: 0.85},
+	}
+	arguments, _ := json.Marshal(map[string]any{"findings": findings})
+	llm := &recordingLLM{responses: []protocol.Response{
+		{ToolCalls: []protocol.ToolCall{{ID: "comment", Name: "code_comment", Arguments: string(arguments)}, {ID: "done", Name: "task_done", Arguments: `{}`}}},
+		{Text: `["c-0"]`},
+	}}
+	r := Runner{
+		Root: t.TempDir(), Config: cfg, Git: fakeGit{files: []gitdiff.FileDiff{file}},
+		DiffRequest: gitdiff.Request{Mode: gitdiff.ModeWorkspace}, LLM: llm,
+		RuleResolver: rules.Resolver{Layers: []rules.Layer{{Source: rules.SourceProject, File: rules.RuleFile{Rules: []rules.RuleEntry{
+			{Name: "First rule", Path: "**/*.go", Rule: "first checks"},
+			{Name: "Second rule", Path: "**/*.go", Rule: "second checks"},
+		}}}}},
+	}
+	report, err := r.Run(context.Background())
+	if err != nil || report.Incomplete || len(report.Findings) != 1 || len(llm.requests) != 2 {
+		t.Fatalf("filter dropped the surviving issue: report=%+v err=%v requests=%+v", report, err, llm.requests)
+	}
+	finding := report.Findings[0]
+	if finding.Severity != "medium" || finding.Evidence != "the changed line panics" || finding.Suggestion != "handle the error" || finding.Confidence != 0.85 || len(finding.MatchedRules) != 1 || finding.MatchedRules[0].ID != "project:2" || finding.RuleID != "project:2" || finding.RuleName != "Second rule" || !requestContains(llm.requests[1], `"id":"c-1"`) || !requestContains(llm.requests[1], "the changed line returns nil") || !requestContains(llm.requests[1], "the changed line panics") {
+		t.Fatalf("filter lost surviving evidence or rule attribution: finding=%+v request=%+v", finding, llm.requests[1])
 	}
 }
 
@@ -481,12 +648,13 @@ func TestRunnerStopsDispatchBeforeProjectedTokenBudgetOverrun(t *testing.T) {
 	second.Path = "second.go"
 	cfg := config.Default()
 	cfg.Review.Concurrency = 1
-	cfg.Review.MaxTokensBudget = estimateReviewChunkTokens(first)
+	resolver := testRuleResolver()
+	cfg.Review.MaxTokensBudget = estimateReviewChunkTokens(first, resolver.ResolveAll(first.Path)...)
 	llm := &recordingLLM{responses: []protocol.Response{
 		withUsage(doneResponse(), agent.TokenUsage{PromptTokens: 80, CompletionTokens: 20, TotalTokens: 100}),
 		doneResponse(),
 	}}
-	r := Runner{Root: t.TempDir(), Config: cfg, Git: fakeGit{files: []gitdiff.FileDiff{first, second}}, DiffRequest: gitdiff.Request{Mode: gitdiff.ModeWorkspace}, LLM: llm, RuleResolver: testRuleResolver()}
+	r := Runner{Root: t.TempDir(), Config: cfg, Git: fakeGit{files: []gitdiff.FileDiff{first, second}}, DiffRequest: gitdiff.Request{Mode: gitdiff.ModeWorkspace}, LLM: llm, RuleResolver: resolver}
 	report, err := r.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -801,7 +969,7 @@ func TestReviewFilterDeletesByIDWithoutRewritingFindings(t *testing.T) {
 	filtered, warning := r.filterFindings(context.Background(), candidates, map[string]string{
 		"current_file_path": "main.go", "system_rule": "rule", "diff": "diff",
 	}, &usage)
-	if warning != "" || len(filtered) != 1 || filtered[0] != candidates[1] {
+	if warning != "" || len(filtered) != 1 || !reflect.DeepEqual(filtered[0], candidates[1]) {
 		t.Fatalf("filter must only delete the selected original finding: filtered=%+v warning=%q", filtered, warning)
 	}
 	if len(llm.requests) != 1 || !requestContains(llm.requests[0], `"id":"c-0"`) || !requestContains(llm.requests[0], `"id":"c-1"`) {
@@ -815,7 +983,7 @@ func TestReviewFilterAcceptsWrappedDeletedIDs(t *testing.T) {
 	filtered, warning := r.filterFindings(context.Background(), candidates, map[string]string{
 		"current_file_path": "main.go", "system_rule": "rule", "diff": "diff",
 	}, &agent.TokenUsage{})
-	if warning != "" || len(filtered) != 1 || filtered[0] != candidates[0] {
+	if warning != "" || len(filtered) != 1 || !reflect.DeepEqual(filtered[0], candidates[0]) {
 		t.Fatalf("wrapped IDs were not accepted: filtered=%+v warning=%q", filtered, warning)
 	}
 }
@@ -870,7 +1038,7 @@ func TestReviewFilterInvalidResponseKeepsOriginalFindings(t *testing.T) {
 	filtered, warning := r.filterFindings(context.Background(), candidates, map[string]string{
 		"current_file_path": "main.go", "system_rule": "rule", "diff": "diff",
 	}, &usage)
-	if len(filtered) != 1 || filtered[0] != candidates[0] || !strings.HasPrefix(warning, "review_filter_invalid_response:") {
+	if len(filtered) != 1 || !reflect.DeepEqual(filtered[0], candidates[0]) || !strings.HasPrefix(warning, "review_filter_invalid_response:") {
 		t.Fatalf("invalid response must preserve findings: filtered=%+v warning=%q", filtered, warning)
 	}
 }
@@ -885,7 +1053,7 @@ func TestReviewFilterReportsTruncatedModelOutput(t *testing.T) {
 	filtered, warning := r.filterFindings(context.Background(), candidates, map[string]string{
 		"current_file_path": "main.go", "system_rule": "rule", "diff": "diff",
 	}, &agent.TokenUsage{})
-	if len(filtered) != 1 || filtered[0] != candidates[0] {
+	if len(filtered) != 1 || !reflect.DeepEqual(filtered[0], candidates[0]) {
 		t.Fatalf("truncated filter must preserve candidates: %+v", filtered)
 	}
 	for _, want := range []string{
@@ -1330,13 +1498,41 @@ func TestFileChunksSplitLargeHunk(t *testing.T) {
 		file.Hunks[0].Lines = append(file.Hunks[0].Lines, line)
 		file.Hunks[0].ChangedLines[i] = true
 	}
-	chunks := fileChunks([]gitdiff.FileDiff{file}, 1000)
+	chunks := fileChunks([]gitdiff.FileDiff{file}, 1000, rules.Resolver{})
 	if len(chunks) < 2 {
 		t.Fatalf("expected large hunk to be split, got %d chunk", len(chunks))
 	}
 	for _, chunk := range chunks {
 		if len(chunk.Hunks) != 1 || len(chunk.Hunks[0].ChangedLines) == 0 {
 			t.Fatalf("chunk lost line mapping: %+v", chunk)
+		}
+	}
+}
+
+func TestFileChunksAccountsForMatchingRules(t *testing.T) {
+	const maxTokens = 1000
+	file := reviewTestFile()
+	file.Hunks[0].Lines = nil
+	file.Hunks[0].ChangedLines = map[int]bool{}
+	resolver := rules.Resolver{Layers: []rules.Layer{{Source: rules.SourceProject, File: rules.RuleFile{Rules: []rules.RuleEntry{{Path: "**/*.go", Rule: strings.Repeat("format rule ", 180)}}}}}}
+	ruleTokens := estimateTokens(renderReviewRules(resolver.ResolveAll(file.Path)))
+	if ruleTokens >= maxTokens*4/5 {
+		t.Fatalf("test rule itself exceeds token limit: %d", ruleTokens)
+	}
+	for line := 1; estimateTokens(renderFileDiff(file)) <= maxTokens*4/5-ruleTokens; line++ {
+		file.Hunks[0].Lines = append(file.Hunks[0].Lines, gitdiff.Line{Kind: '+', NewLine: line, Text: "value := calculateResult(input)"})
+		file.Hunks[0].ChangedLines[line] = true
+	}
+	if estimateTokens(renderFileDiff(file)) > maxTokens*7/10 {
+		t.Fatal("test diff unexpectedly exceeds the original chunk target")
+	}
+	chunks := fileChunks([]gitdiff.FileDiff{file}, maxTokens, resolver)
+	if len(chunks) < 2 {
+		t.Fatalf("expected rule-aware split, got %d chunk", len(chunks))
+	}
+	for _, chunk := range chunks {
+		if tokens := ruleTokens + estimateTokens(renderFileDiff(chunk)); tokens > maxTokens*4/5 {
+			t.Fatalf("chunk still exceeds review threshold: %d", tokens)
 		}
 	}
 }

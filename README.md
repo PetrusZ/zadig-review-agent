@@ -138,7 +138,7 @@ zadig-review-agent review --debug-file "$PWD/llm-debug.jsonl"
 3. `~/.zadig-review/rules.json`
 4. 内置系统规则
 
-参考 [.zadig-review/rules.example.json](.zadig-review/rules.example.json) 和 [.zadig-review/docs/go-review.md](.zadig-review/docs/go-review.md)。可检查单个路径最终使用的规则：
+每条规则可设置可选的 `name`；同一路径可以命中当前最高优先级规则文件中的多条规则。同一问题若由多条规则指出，结果合并为一条 finding 并列出所有相关规则；无法归属的问题仍会保留。内置规则也都有名称。参考 [.zadig-review/rules.example.json](.zadig-review/rules.example.json) 和 [.zadig-review/docs/go-review.md](.zadig-review/docs/go-review.md)。可检查单个路径最终使用的所有规则：
 
 ```bash
 zadig-review-agent rules check internal/reviewer/reviewer.go
