@@ -322,8 +322,63 @@ func TestValidateFindingsNormalizesModelEnumVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Severity != "medium" || findings[0].Category != "correctness" {
+	if len(findings) != 1 || findings[0].Severity != "medium" || findings[0].Category != "reliability" {
 		t.Fatalf("model enum variants were not normalized: %+v", findings)
+	}
+}
+
+func TestValidateFindingCategoriesAndNames(t *testing.T) {
+	file := reviewTestFile()
+	for _, tc := range []struct{ input, id, name string }{
+		{"style", "style", "代码规范"},
+		{"reliability", "reliability", "正确性与可靠性"},
+		{"maintainability", "maintainability", "可维护性"},
+		{"performance", "performance", "性能效率"},
+		{"security", "security", "安全风险"},
+		{"tests", "tests", "测试质量"},
+		{"build", "build", "构建与交付"},
+		{"correctness", "reliability", "正确性与可靠性"},
+		{"Concurrency", "reliability", "正确性与可靠性"},
+		{"compatibility", "reliability", "正确性与可靠性"},
+		{"bug", "reliability", "正确性与可靠性"},
+		{"Error_Handling", "reliability", "正确性与可靠性"},
+		{"resource-management", "reliability", "正确性与可靠性"},
+		{"test coverage", "tests", "测试质量"},
+		{"testing", "tests", "测试质量"},
+		{"formatting", "style", "代码规范"},
+		{"naming", "style", "代码规范"},
+		{"unknown", "", ""},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			candidate := agent.Finding{Severity: "high", Category: tc.input, CategoryName: "model supplied name", File: file.Path, StartLine: 10, EndLine: 10, Title: "issue", Problem: "problem", Confidence: 0.9}
+			got, err := validateFindings([]agent.Finding{candidate}, file, nil, 0.75)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.id == "" {
+				if len(got) != 0 {
+					t.Fatalf("unknown category accepted: %+v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Category != tc.id || got[0].CategoryName != tc.name {
+				t.Fatalf("unexpected category: %+v", got)
+			}
+			if DecideExit(agent.Report{Findings: got}, []string{"high"}) != agent.ExitBlocked {
+				t.Fatal("English severity no longer triggers the quality gate")
+			}
+			var serialized agent.Finding
+			data, err := json.Marshal(got[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &serialized); err != nil {
+				t.Fatal(err)
+			}
+			if serialized.Category != tc.id || serialized.CategoryName != tc.name || serialized.Severity != "high" || strings.Contains(string(data), "severity_name") {
+				t.Fatalf("JSON classification mismatch: %s", data)
+			}
+		})
 	}
 }
 
@@ -364,9 +419,10 @@ func TestAggregateMergesRuleAttributionForSameIssue(t *testing.T) {
 	candidate := agent.Finding{Severity: "low", Category: "style", File: file.Path, StartLine: 10, EndLine: 10, Title: "same issue", Problem: "same problem", Confidence: 0.9}
 	first, second, unattributed := candidate, candidate, candidate
 	first.RuleID, second.RuleID, unattributed.RuleID = "R2", "R1", "invalid"
+	first.Category, second.Category, unattributed.Category = "correctness", "concurrency", "compatibility"
 	findings, err := validateFindings([]agent.Finding{first, second, unattributed, second}, file, matched, 0.75)
 	merged := aggregate(findings)
-	if err != nil || len(merged) != 1 || len(merged[0].MatchedRules) != 2 || merged[0].MatchedRules[0].ID != "project:1" || merged[0].MatchedRules[1].ID != "project:2" || merged[0].RuleID != "project:1" {
+	if err != nil || len(merged) != 1 || merged[0].Category != "reliability" || merged[0].CategoryName != "正确性与可靠性" || len(merged[0].MatchedRules) != 2 || merged[0].MatchedRules[0].ID != "project:1" || merged[0].MatchedRules[1].ID != "project:2" || merged[0].RuleID != "project:1" {
 		t.Fatalf("same issue did not merge both rule attributions: %+v err=%v", merged, err)
 	}
 }
@@ -457,7 +513,7 @@ func TestRunnerLocalizesMergedFindingOnce(t *testing.T) {
 	if err != nil || report.Incomplete || len(report.Findings) != 1 || len(report.Findings[0].MatchedRules) != 2 || len(llm.requests) != 3 {
 		t.Fatalf("localization separated duplicate findings: report=%+v err=%v requests=%d", report, err, len(llm.requests))
 	}
-	if report.Findings[0].Title != "相同问题" || report.Findings[0].MatchedRules[0].ID != "project:1" || report.Findings[0].MatchedRules[1].ID != "project:2" || !requestContains(llm.requests[1], `"id":"c-1"`) || requestContains(llm.requests[2], `"id":"c-1"`) {
+	if report.Findings[0].Category != "reliability" || report.Findings[0].CategoryName != "正确性与可靠性" || report.Findings[0].Title != "相同问题" || report.Findings[0].MatchedRules[0].ID != "project:1" || report.Findings[0].MatchedRules[1].ID != "project:2" || !requestContains(llm.requests[1], `"id":"c-1"`) || requestContains(llm.requests[2], `"id":"c-1"`) {
 		t.Fatalf("localized finding lost rule attribution: %+v", report.Findings[0])
 	}
 }
@@ -488,7 +544,7 @@ func TestRunnerFilterRetainsOnlySurvivingEvidenceAndRuleName(t *testing.T) {
 		t.Fatalf("filter dropped the surviving issue: report=%+v err=%v requests=%+v", report, err, llm.requests)
 	}
 	finding := report.Findings[0]
-	if finding.Severity != "medium" || finding.Evidence != "the changed line panics" || finding.Suggestion != "handle the error" || finding.Confidence != 0.85 || len(finding.MatchedRules) != 1 || finding.MatchedRules[0].ID != "project:2" || finding.RuleID != "project:2" || finding.RuleName != "Second rule" || !requestContains(llm.requests[1], `"id":"c-1"`) || !requestContains(llm.requests[1], "the changed line returns nil") || !requestContains(llm.requests[1], "the changed line panics") {
+	if finding.Category != "reliability" || finding.CategoryName != "正确性与可靠性" || finding.Severity != "medium" || finding.Evidence != "the changed line panics" || finding.Suggestion != "handle the error" || finding.Confidence != 0.85 || len(finding.MatchedRules) != 1 || finding.MatchedRules[0].ID != "project:2" || finding.RuleID != "project:2" || finding.RuleName != "Second rule" || !requestContains(llm.requests[1], `"id":"c-1"`) || !requestContains(llm.requests[1], "the changed line returns nil") || !requestContains(llm.requests[1], "the changed line panics") {
 		t.Fatalf("filter lost surviving evidence or rule attribution: finding=%+v request=%+v", finding, llm.requests[1])
 	}
 }

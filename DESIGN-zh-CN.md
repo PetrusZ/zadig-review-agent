@@ -13,7 +13,7 @@
 
 当前版本不会修改仓库、执行任意 Shell、访问外部 MCP、加载 Skill，也不会向 GitHub、GitLab 或 Gitee 回写评论。
 
-审查关注正确性、安全、并发、资源管理、性能、兼容性和关键测试缺失。纯格式、命名偏好和没有实际风险的风格问题默认不报告。
+审查问题分为代码规范、正确性与可靠性、可维护性、性能效率、安全风险、测试质量、构建与交付七类。规范问题须违反明确规则，可维护性与测试问题须有具体成本或风险证据，纯偏好建议不报告。
 
 ## 2. 总体架构
 
@@ -292,7 +292,7 @@ Commit/Range 模式的 `file_read` 从被审查 ref 读取，Workspace 模式读
 ```json
 {
   "severity": "high",
-  "category": "correctness",
+  "category": "reliability",
   "rule_id": "R1",
   "file": "internal/order/service.go",
   "start_line": 82,
@@ -306,7 +306,7 @@ Commit/Range 模式的 `file_read` 从被审查 ref 读取，Workspace 模式读
 }
 ```
 
-`severity` 和 `category` 在最终验证前统一转为小写。工具 schema 将 category 限制为 `correctness`、`security`、`concurrency`、`performance`、`compatibility`、`tests` 和 `style`；`style` 仅用于自定义规则明确规定的可核实格式、命名问题。对少数常见兼容值做确定性归一化，例如 `Error Handling`、`reliability` 映射为 `correctness`，`test coverage` 映射为 `tests`。未知类别仍会被丢弃。示例中的 `R1` 是当次审查的临时编号；多个规则可通过 `rule_ids` 数组提交。最终报告的 `matched_rules` 列出全部已验证的规则；兼容字段 `rule_id`、`rule_name` 指向列表中的第一条。
+`severity` 和 `category` 在最终验证前统一转为小写。工具 schema 将 category 限制为 `style`、`reliability`、`maintainability`、`performance`、`security`、`tests`、`build`。每条 finding 按缺陷及其直接影响选择一个主要类别，不根据文件、规则名称或章节分类。代码规范问题必须违反内置或自定义规则中的明确约定；可维护性问题必须有具体成本或风险证据。旧值 `correctness`、`concurrency`、`compatibility`、`Error Handling`、`resource management` 归一化为 `reliability`，保留测试和格式别名；未知类别仍被丢弃。程序在生成 fingerprint 前填充中文 `category_name`，覆盖模型提供的名称。控制台和 Markdown 使用中文分类及严重程度标签（严重、高、中、低），包括严重程度统计，且不受正文语言设置影响；JSON ID 和质量门禁使用英文。历史报告不重写，类别归一化变化可能改变 fingerprint。示例中的 `R1` 是当次审查的临时编号；多个规则可通过 `rule_ids` 数组提交。最终报告的 `matched_rules` 列出全部已验证的规则；兼容字段 `rule_id`、`rule_name` 指向列表中的第一条。
 
 完成定位后，先校验 finding 并生成 fingerprint，再交给 Review Filter。过滤器会分别看到同指纹候选的证据，只能删除被 diff 直接证伪的候选。随后合并幸存的重复问题，仅保留同指纹幸存候选的规则归属。在输出语言不是 English 时，再使用独立的无工具 Localization Prompt 批量本地化 `title`、`problem`、`evidence` 和 `suggestion`；当所有人类可读字段已经使用请求的中文文字时跳过这次重复请求。Fingerprint 保留原始措辞，避免相同问题因译文不同而无法去重。本地化只能按候选 ID 改写人类可读字段，不能修改文件、行号、severity、category、confidence 或 finding 数量。Filter 和 Localization 接受裸数组及有限的常见包装对象；响应非法时追加严格格式提示重试一次。`finish_reason=length` 会被明确报告为输出截断，截断内容不会回放到重试上下文。重试后仍失败则保留原 finding、记录 warning，并将审查标记为不完整。
 

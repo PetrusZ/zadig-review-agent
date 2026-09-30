@@ -484,6 +484,7 @@ func validateFindings(candidates []agent.Finding, file gitdiff.FileDiff, matched
 		if !validSeverity(finding.Severity) || !validCategory(finding.Category) {
 			continue
 		}
+		finding.CategoryName = agent.CategoryName(finding.Category)
 		if finding.Confidence < threshold {
 			continue
 		}
@@ -521,16 +522,12 @@ func normalizeCategory(category string) string {
 	normalized = strings.NewReplacer("-", " ", "_", " ").Replace(normalized)
 	normalized = strings.Join(strings.Fields(normalized), " ")
 	switch normalized {
-	case "bug", "correctness", "error handling", "reliability", "resource management":
-		return "correctness"
+	case "bug", "correctness", "error handling", "reliability", "resource management", "concurrency", "compatibility":
+		return "reliability"
 	case "security":
 		return "security"
-	case "concurrency":
-		return "concurrency"
 	case "performance":
 		return "performance"
-	case "compatibility":
-		return "compatibility"
 	case "test", "testing", "tests", "test coverage":
 		return "tests"
 	case "style", "formatting", "naming":
@@ -561,12 +558,7 @@ func validSeverity(severity string) bool {
 }
 
 func validCategory(category string) bool {
-	switch category {
-	case "correctness", "security", "concurrency", "performance", "compatibility", "tests", "style":
-		return true
-	default:
-		return false
-	}
+	return agent.CategoryName(category) != ""
 }
 
 func aggregate(findings []agent.Finding) []agent.Finding {

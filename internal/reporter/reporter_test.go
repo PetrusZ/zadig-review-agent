@@ -11,12 +11,12 @@ import (
 func TestMarkdownIncludesFinding(t *testing.T) {
 	report := agent.Report{DurationMS: 192345, Process: agent.ReviewProcess{ToolCalls: []agent.ToolCall{{ID: "tool-0001", File: "main.go", Round: 1, Tool: "code_search", Arguments: agent.ToolArguments{SearchText: "target"}, Status: "success", OutputBytes: 20, Summary: "1 matches", Output: "main.go:1: target"}}, Compressions: []agent.Compression{{ID: "compression-0001", File: "main.go", Round: 3, Status: "success", DurationMS: 500, BeforeTokens: 9000, AfterTokens: 3000, Usage: agent.TokenUsage{LLMRequests: 1}}}}, Usage: agent.TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, LLMRequests: 2, CacheReadTokens: 3, CacheWriteTokens: 4}, Warnings: []string{"token_threshold_exceeded: huge.go"}, Findings: []agent.Finding{{
 		Severity: "high",
-		Category: "correctness",
+		Category: "reliability",
 		File:     "main.go",
 		Title:    "Bug",
 	}}}
 	md := Markdown(report)
-	if !strings.Contains(md, "[high] Bug") || !strings.Contains(md, "main.go") || !strings.Contains(md, "Review duration: `3m12.345s`") || !strings.Contains(md, "Tool calls: `1`") || !strings.Contains(md, "Context compressions: `1`") || !strings.Contains(md, "## Context Compressions") || !strings.Contains(md, "tokens `9000 -> 3000`") || !strings.Contains(md, "## Tool Calls") || !strings.Contains(md, "`tool-0001` `code_search`") || !strings.Contains(md, "Prompt Tokens: `10`") || !strings.Contains(md, "Cache Write Tokens: `4`") || !strings.Contains(md, "token_threshold_exceeded") {
+	if !strings.Contains(md, "[高] Bug") || !strings.Contains(md, "main.go") || !strings.Contains(md, "Review duration: `3m12.345s`") || !strings.Contains(md, "Tool calls: `1`") || !strings.Contains(md, "Context compressions: `1`") || !strings.Contains(md, "## Context Compressions") || !strings.Contains(md, "tokens `9000 -> 3000`") || !strings.Contains(md, "## Tool Calls") || !strings.Contains(md, "`tool-0001` `code_search`") || !strings.Contains(md, "Prompt Tokens: `10`") || !strings.Contains(md, "Cache Write Tokens: `4`") || !strings.Contains(md, "token_threshold_exceeded") {
 		t.Fatalf("markdown missing finding:\n%s", md)
 	}
 	console := Console(report, "summary")
@@ -24,7 +24,7 @@ func TestMarkdownIncludesFinding(t *testing.T) {
 		t.Fatalf("console missing usage:\n%s", console)
 	}
 	detailed := Console(report, "detailed")
-	if !strings.Contains(detailed, "─── main.go:0-0 ───") || !strings.Contains(detailed, "[correctness · high] **Bug**") {
+	if !strings.Contains(detailed, "─── main.go:0-0 ───") || !strings.Contains(detailed, "[正确性与可靠性 · 高] **Bug**") {
 		t.Fatalf("console finding format is not grouped:\n%s", detailed)
 	}
 	if !strings.Contains(console, "excluded: 0\n\nReview result:") {
@@ -64,6 +64,45 @@ func TestJSONIncludesEmptyCompressions(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"compressions":[]`) {
 		t.Fatalf("empty compression history must remain observable: %s", data)
+	}
+}
+
+func TestReportsUseChineseCategoryAndSeverityLabels(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		for _, category := range []struct{ id, name string }{
+			{"style", "代码规范"}, {"reliability", "正确性与可靠性"},
+			{"maintainability", "可维护性"}, {"performance", "性能效率"},
+			{"security", "安全风险"}, {"tests", "测试质量"}, {"build", "构建与交付"},
+		} {
+			for _, severity := range []struct{ id, name string }{
+				{"critical", "严重"}, {"high", "高"}, {"medium", "中"}, {"low", "低"},
+			} {
+				t.Run(language+"/"+category.id+"/"+severity.id, func(t *testing.T) {
+					report := agent.Report{
+						Metadata: agent.Metadata{Language: language},
+						Stats:    agent.Stats{BySeverity: map[string]int{severity.id: 1}},
+						Findings: []agent.Finding{{Category: category.id, CategoryName: category.name, Severity: severity.id, Title: "issue"}},
+					}
+					md := Markdown(report)
+					console := ConsoleResult(report, "detailed")
+					if !strings.Contains(md, "- 分类："+category.name) || !strings.Contains(md, "### ["+severity.name+"] issue") || !strings.Contains(md, "- "+severity.name+": `1`") {
+						t.Fatalf("Markdown labels are not Chinese:\n%s", md)
+					}
+					if !strings.Contains(console, "["+category.name+" · "+severity.name+"]") || !strings.Contains(console, severity.name+": 1") || !strings.Contains(ConsoleResult(report, "summary"), severity.name+": 1") {
+						t.Fatalf("console labels are not Chinese:\n%s", console)
+					}
+					data, err := json.Marshal(report)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, field := range []string{`"category":"` + category.id + `"`, `"category_name":"` + category.name + `"`, `"severity":"` + severity.id + `"`, `"by_severity":{"` + severity.id + `":1}`} {
+						if !strings.Contains(string(data), field) {
+							t.Fatalf("JSON field missing %s: %s", field, data)
+						}
+					}
+				})
+			}
+		}
 	}
 }
 

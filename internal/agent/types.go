@@ -10,6 +10,7 @@ const (
 type Finding struct {
 	Severity     string        `json:"severity"`
 	Category     string        `json:"category"`
+	CategoryName string        `json:"category_name"`
 	RuleID       string        `json:"rule_id,omitempty"`
 	RuleIDs      []string      `json:"rule_ids,omitempty"`
 	RuleName     string        `json:"rule_name,omitempty"`

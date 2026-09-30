@@ -108,7 +108,7 @@ func ConsoleResult(report agent.Report, mode string) string {
 	}
 	for _, sev := range []string{"critical", "high", "medium", "low"} {
 		if n := report.Stats.BySeverity[sev]; n > 0 {
-			fmt.Fprintf(&b, "%s: %d\n", sev, n)
+			fmt.Fprintf(&b, "%s: %d\n", agent.SeverityName(sev), n)
 		}
 	}
 	if mode == "summary" {
@@ -117,7 +117,7 @@ func ConsoleResult(report agent.Report, mode string) string {
 	}
 	for _, finding := range report.Findings {
 		fmt.Fprintf(&b, "\n─── %s:%d-%d ───\n", finding.File, finding.StartLine, finding.EndLine)
-		fmt.Fprintf(&b, "[%s · %s] **%s**\n\n", finding.Category, finding.Severity, finding.Title)
+		fmt.Fprintf(&b, "[%s · %s] **%s**\n\n", agent.CategoryName(finding.Category), agent.SeverityName(finding.Severity), finding.Title)
 		labels := findingRuleLabels(finding, false)
 		if len(labels) == 0 {
 			b.WriteString("Rule: unattributed\n\n")
@@ -180,6 +180,11 @@ func Markdown(report agent.Report) string {
 	fmt.Fprintf(&b, "- Changed files: `%d`\n", report.Stats.ChangedFiles)
 	fmt.Fprintf(&b, "- Chunks: `%d`\n", report.Stats.Chunks)
 	fmt.Fprintf(&b, "- Excluded files: `%d`\n", len(report.ExcludedFiles))
+	for _, severity := range []string{"critical", "high", "medium", "low"} {
+		if count := report.Stats.BySeverity[severity]; count > 0 {
+			fmt.Fprintf(&b, "- %s: `%d`\n", agent.SeverityName(severity), count)
+		}
+	}
 	fmt.Fprintf(&b, "- Exit code: `%d`\n", report.ExitCode)
 	fmt.Fprintf(&b, "- Review duration: `%s`\n", formatDuration(report.DurationMS))
 	fmt.Fprintf(&b, "- Tool calls: `%d`\n", len(report.Process.ToolCalls))
@@ -221,9 +226,9 @@ func Markdown(report agent.Report) string {
 		b.WriteString("No verified findings.\n")
 	} else {
 		for _, finding := range report.Findings {
-			fmt.Fprintf(&b, "### [%s] %s\n\n", finding.Severity, finding.Title)
+			fmt.Fprintf(&b, "### [%s] %s\n\n", agent.SeverityName(finding.Severity), finding.Title)
 			fmt.Fprintf(&b, "- Location: `%s:%d-%d`\n", finding.File, finding.StartLine, finding.EndLine)
-			fmt.Fprintf(&b, "- Category: `%s`\n", finding.Category)
+			fmt.Fprintf(&b, "- 分类：%s\n", agent.CategoryName(finding.Category))
 			labels := findingRuleLabels(finding, true)
 			if len(labels) == 0 {
 				b.WriteString("- Rule: unattributed\n")

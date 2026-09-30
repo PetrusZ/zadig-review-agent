@@ -10,7 +10,7 @@
 
 ## 功能简介
 
-Zadig Review Agent 读取 Git 变更，使用用户配置的大语言模型识别具体缺陷，将每条问题与真实 diff 进行校验，并生成控制台、JSON 和 Markdown 报告。审查重点包括正确性、安全、并发、资源管理、性能、兼容性和关键测试缺失。
+Zadig Review Agent 读取 Git 变更，使用用户配置的大语言模型识别具体缺陷，将每条问题与真实 diff 进行校验，并生成控制台、JSON 和 Markdown 报告。审查问题分为代码规范、正确性与可靠性、可维护性、性能效率、安全风险、测试质量、构建与交付七类。
 
 主要特性：
 
@@ -143,6 +143,35 @@ zadig-review-agent review --debug-file "$PWD/llm-debug.jsonl"
 ```bash
 zadig-review-agent rules check internal/reviewer/reviewer.go
 ```
+
+## 问题分类与结果展示
+
+每条 finding 选择一个主要类别，并可关联多条规则来源。分类按具体缺陷及其直接影响判断，不由文件类型、规则名称或章节决定；有多种影响时选择证据最直接、最能解释修复必要性的一类。
+
+| JSON `category` | 中文名称 |
+|---|---|
+| `style` | 代码规范 |
+| `reliability` | 正确性与可靠性 |
+| `maintainability` | 可维护性 |
+| `performance` | 性能效率 |
+| `security` | 安全风险 |
+| `tests` | 测试质量 |
+| `build` | 构建与交付 |
+
+明确的格式、命名和编码约定违反归代码规范；有证据的修改困难归可维护性。资源泄漏导致耗尽归正确性与可靠性，多余分配归性能效率。CI 执行不可信代码归安全风险，缺失工具依赖归构建与交付。测试质量检查须有具体回归风险或明确规则要求，不能仅因没有测试就报告问题。
+
+JSON 保留英文 `category`，追加程序生成的 `category_name`；`severity` 和 `stats.by_severity` 继续使用英文值。控制台及 Markdown 的分类和严重程度固定以中文展示，不受正文语言设置影响：`critical` → 严重，`high` → 高，`medium` → 中，`low` → 低。
+
+```json
+{"category":"reliability","category_name":"正确性与可靠性","severity":"high","title":"错误分支可能导致空指针访问"}
+```
+
+```text
+[正确性与可靠性 · 高] 错误分支可能导致空指针访问
+Rule: Go 综合审查 (project:1)
+```
+
+旧模型输出中的 `correctness`、`concurrency`、`compatibility` 统一归一化为 `reliability`。历史报告不重写，依赖旧类别值的下游需调整；类别参与 fingerprint，因此相关 fingerprint 可能改变。分类在生成 finding 的同次模型调用中完成，不增加模型调用或分类配置。
 
 ## CI 用法
 

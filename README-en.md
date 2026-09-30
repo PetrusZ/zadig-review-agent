@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 ## What it does
 
-Zadig Review Agent reviews Git changes, asks a configured language model to identify concrete defects, validates every finding against the actual diff, and produces console, JSON, and Markdown reports. It focuses on correctness, security, concurrency, resource management, performance, compatibility, and missing critical tests.
+Zadig Review Agent reviews Git changes, asks a configured language model to identify concrete defects, validates every finding against the actual diff, and produces console, JSON, and Markdown reports. Findings use seven categories: code conventions, correctness and reliability, maintainability, performance efficiency, security risks, test quality, and build and delivery.
 
 Key properties:
 
@@ -131,6 +131,35 @@ Each rule may have a `name`. Multiple rules in the highest-priority matching rul
 ```bash
 zadig-review-agent rules check internal/reviewer/reviewer.go
 ```
+
+## Finding categories and display
+
+Each finding has one primary category and may cite several rules. Classification follows the specific defect and its direct impact, not the filename, rule name, or section. When several impacts apply, choose the category with the most direct evidence explaining why a fix is needed.
+
+| JSON `category` | Chinese display name |
+|---|---|
+| `style` | 代码规范 |
+| `reliability` | 正确性与可靠性 |
+| `maintainability` | 可维护性 |
+| `performance` | 性能效率 |
+| `security` | 安全风险 |
+| `tests` | 测试质量 |
+| `build` | 构建与交付 |
+
+Explicit convention violations belong to style; concrete modification difficulties belong to maintainability. Resource leaks causing exhaustion belong to reliability; unnecessary allocations belong to performance. Untrusted CI code execution belongs to security; missing build tools belong to build. Missing tests require a concrete regression risk or an explicit rule requirement.
+
+JSON keeps English `category` IDs and adds a program-generated Chinese `category_name`. `severity` and `stats.by_severity` remain English. Console and Markdown category and severity labels are always Chinese, regardless of the finding prose language: `critical` → 严重, `high` → 高, `medium` → 中, `low` → 低.
+
+```json
+{"category":"reliability","category_name":"正确性与可靠性","severity":"high","title":"Possible null dereference in the error branch"}
+```
+
+```text
+[正确性与可靠性 · 高] Possible null dereference in the error branch
+Rule: Go review (project:1)
+```
+
+Legacy model categories `correctness`, `concurrency`, and `compatibility` normalize to `reliability`. Historical reports are not rewritten; consumers of the old IDs must adapt, and fingerprints may change because category participates in the hash. Classification happens in the existing finding-generation request and adds no model calls or category configuration.
 
 ## CI usage
 
