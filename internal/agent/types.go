@@ -149,6 +149,9 @@ type Metadata struct {
 
 type Stats struct {
 	ChangedFiles int            `json:"changed_files"`
+	Additions    int            `json:"additions"`
+	Deletions    int            `json:"deletions"`
+	ChangedLines int            `json:"changed_lines"`
 	Chunks       int            `json:"chunks"`
 	BySeverity   map[string]int `json:"by_severity"`
 }

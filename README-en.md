@@ -148,7 +148,9 @@ Each finding has one primary category and may cite several rules. Classification
 
 Explicit convention violations belong to style; concrete modification difficulties belong to maintainability. Resource leaks causing exhaustion belong to reliability; unnecessary allocations belong to performance. Untrusted CI code execution belongs to security; missing build tools belong to build. Missing tests require a concrete regression risk or an explicit rule requirement.
 
-JSON keeps English `category` IDs and adds a program-generated Chinese `category_name`. `severity` and `stats.by_severity` remain English. Console and Markdown category and severity labels are always Chinese, regardless of the finding prose language: `critical` → 严重, `high` → 高, `medium` → 中, `low` → 低.
+JSON keeps English `category` IDs and adds a program-generated Chinese `category_name`. `severity` and `stats.by_severity` remain English. Console uses Chinese category labels and English severities (`critical/high/medium/low`). Markdown category and severity labels are always Chinese, regardless of the finding prose language: `critical` → 严重, `high` → 高, `medium` → 中, `low` → 低.
+
+JSON includes `stats.additions`, `stats.deletions`, and their sum, `stats.changed_lines`, even when zero. Replacing one line counts as one deletion plus one addition, or two changed lines. Counts cover all changed files, including files excluded from review and sensitive files; only counts are collected, without reporting sensitive contents. Binary files contribute no lines, and pure renames contribute zero. Range mode compares the merge base with the target commit; commit mode counts the specified commit; workspace mode includes untracked files. `stats.changed_files` still counts only files retained for review. Review and preview use the same counting rules. Failed statistics collection produces an error or an incomplete review; zero counts in a failed report do not mean there were no changes.
 
 ```json
 {"category":"reliability","category_name":"正确性与可靠性","severity":"high","title":"Possible null dereference in the error branch"}

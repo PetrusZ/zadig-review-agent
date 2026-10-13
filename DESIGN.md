@@ -86,7 +86,7 @@ review:
   max_tool_rounds: 30
   max_context_tool_calls: 10
   context_convergence_ratio: 0.5
-  max_chunk_tokens: 20000
+  max_chunk_tokens: 30000
   max_tokens_budget: 0
   confidence_threshold: 0.75
   fail_on: [critical, high]
@@ -96,7 +96,7 @@ model:
   name: configured-model
   endpoint: https://api.openai.com/v1
   api_key: sk-...
-  timeout: 8m
+  timeout: 10m
 
 output:
   json: review-report.json
@@ -221,7 +221,7 @@ Commit/range `file_read` uses the reviewed ref; workspace mode uses the working 
 
 ## 9. Finding validation
 
-`code_comment` submits one `finding` or a `findings` batch of up to 10 entries. Each entry contains severity, category, optional temporary R-number rule reference (`rule_id`) or references (`rule_ids`), path, line range, existing code, human-readable explanation, suggestion, and confidence. Valid references become the report's `matched_rules` list; compatibility fields `rule_id` and `rule_name` point to its first entry. Missing or invalid references do not remove the finding. Severity and category are normalized to lowercase. Categories are restricted to style, reliability, maintainability, performance, security, tests, and build. Each finding chooses one primary category based on the defect and its direct impact; filenames and rule names do not determine it. Style requires an objectively checkable convention explicitly stated by a built-in or custom rule; maintainability requires concrete cost or risk evidence. Legacy correctness, concurrency, compatibility, error-handling, and resource-management categories normalize to reliability. Test and formatting aliases remain supported. Unknown categories are rejected. The program overwrites any model-supplied category_name with the shared Chinese label before fingerprinting. Console and Markdown display Chinese category and severity labels (严重、高、中、低), including severity statistics, regardless of prose language; JSON IDs and quality gates remain English. Historical reports are not rewritten, and fingerprints can change when categories normalize differently.
+`code_comment` submits one `finding` or a `findings` batch of up to 10 entries. Each entry contains severity, category, optional temporary R-number rule reference (`rule_id`) or references (`rule_ids`), path, line range, existing code, human-readable explanation, suggestion, and confidence. Valid references become the report's `matched_rules` list; compatibility fields `rule_id` and `rule_name` point to its first entry. Missing or invalid references do not remove the finding. Severity and category are normalized to lowercase. Categories are restricted to style, reliability, maintainability, performance, security, tests, and build. Each finding chooses one primary category based on the defect and its direct impact; filenames and rule names do not determine it. Style requires an objectively checkable convention explicitly stated by a built-in or custom rule; maintainability requires concrete cost or risk evidence. Legacy correctness, concurrency, compatibility, error-handling, and resource-management categories normalize to reliability. Test and formatting aliases remain supported. Unknown categories are rejected. The program overwrites any model-supplied category_name with the shared Chinese label before fingerprinting. Console displays Chinese category labels and English severities (critical/high/medium/low), including severity statistics. Markdown displays Chinese category and severity labels (严重、高、中、低), regardless of prose language; JSON IDs and quality gates remain English. Historical reports are not rewritten, and fingerprints can change when categories normalize differently.
 
 After positioning, findings are validated and fingerprinted before Review Filter. The filter sees each candidate's evidence separately, including candidates with the same fingerprint, and may delete only candidates disproved by the diff. Surviving candidates are then deduplicated, retaining rule attributions only from surviving candidates with that fingerprint. Non-English output is localized in one tool-free batch unless every human-readable field already uses the requested Chinese script. Localization can only rewrite title, problem, evidence, and suggestion by candidate ID; the fingerprint remains based on the original wording. It cannot change paths, lines, severity, category, confidence, or finding count. Review Filter and Localization accept bare arrays and a small set of common wrappers, retry malformed responses once with strict formatting, and retain original findings while marking the review incomplete if retries fail. A response ending with `finish_reason=length` is reported explicitly as truncated and is not replayed into the retry context.
 

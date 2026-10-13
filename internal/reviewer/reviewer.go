@@ -42,6 +42,7 @@ type Runner struct {
 type GitClient interface {
 	Head(context.Context) (string, error)
 	Diff(context.Context, gitdiff.Request) ([]gitdiff.FileDiff, error)
+	DiffStats(context.Context, gitdiff.Request) (gitdiff.Stats, error)
 }
 
 func (r Runner) Run(ctx context.Context) (report agent.Report, runErr error) {
@@ -68,6 +69,10 @@ func (r Runner) Run(ctx context.Context) (report agent.Report, runErr error) {
 	files, err := r.Git.Diff(ctx, r.DiffRequest)
 	if err != nil {
 		return incomplete(r, head, err), nil
+	}
+	lineStats, err := r.Git.DiffStats(ctx, r.DiffRequest)
+	if err != nil {
+		return incomplete(r, head, fmt.Errorf("git diff stats: %w", err)), nil
 	}
 	var blocked map[string]bool
 	if client, ok := r.Git.(interface {
@@ -98,6 +103,9 @@ func (r Runner) Run(ctx context.Context) (report agent.Report, runErr error) {
 		},
 		Stats: agent.Stats{
 			ChangedFiles: len(filtered.Kept),
+			Additions:    lineStats.Additions,
+			Deletions:    lineStats.Deletions,
+			ChangedLines: lineStats.Additions + lineStats.Deletions,
 			Chunks:       len(chunks),
 			BySeverity:   map[string]int{},
 		},

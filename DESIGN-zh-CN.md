@@ -107,7 +107,7 @@ review:
   max_tool_rounds: 30
   max_context_tool_calls: 10
   context_convergence_ratio: 0.5
-  max_chunk_tokens: 20000
+  max_chunk_tokens: 30000
   max_tokens_budget: 0
   confidence_threshold: 0.75
   fail_on:
@@ -119,7 +119,7 @@ model:
   name: configured-model
   endpoint: https://api.openai.com/v1
   api_key: sk-...
-  timeout: 8m
+  timeout: 10m
 
 output:
   json: review-report.json
@@ -141,7 +141,7 @@ output:
 export ZADIG_REVIEW_MODEL_PROTOCOL=openai
 export ZADIG_REVIEW_MODEL_NAME=gpt-4o
 export ZADIG_REVIEW_MODEL_ENDPOINT=https://api.openai.com/v1
-export ZADIG_REVIEW_MODEL_TIMEOUT=8m
+export ZADIG_REVIEW_MODEL_TIMEOUT=10m
 export ZADIG_REVIEW_MODEL_API_KEY=...
 ```
 
@@ -306,7 +306,7 @@ Commit/Range 模式的 `file_read` 从被审查 ref 读取，Workspace 模式读
 }
 ```
 
-`severity` 和 `category` 在最终验证前统一转为小写。工具 schema 将 category 限制为 `style`、`reliability`、`maintainability`、`performance`、`security`、`tests`、`build`。每条 finding 按缺陷及其直接影响选择一个主要类别，不根据文件、规则名称或章节分类。代码规范问题必须违反内置或自定义规则中的明确约定；可维护性问题必须有具体成本或风险证据。旧值 `correctness`、`concurrency`、`compatibility`、`Error Handling`、`resource management` 归一化为 `reliability`，保留测试和格式别名；未知类别仍被丢弃。程序在生成 fingerprint 前填充中文 `category_name`，覆盖模型提供的名称。控制台和 Markdown 使用中文分类及严重程度标签（严重、高、中、低），包括严重程度统计，且不受正文语言设置影响；JSON ID 和质量门禁使用英文。历史报告不重写，类别归一化变化可能改变 fingerprint。示例中的 `R1` 是当次审查的临时编号；多个规则可通过 `rule_ids` 数组提交。最终报告的 `matched_rules` 列出全部已验证的规则；兼容字段 `rule_id`、`rule_name` 指向列表中的第一条。
+`severity` 和 `category` 在最终验证前统一转为小写。工具 schema 将 category 限制为 `style`、`reliability`、`maintainability`、`performance`、`security`、`tests`、`build`。每条 finding 按缺陷及其直接影响选择一个主要类别，不根据文件、规则名称或章节分类。代码规范问题必须违反内置或自定义规则中的明确约定；可维护性问题必须有具体成本或风险证据。旧值 `correctness`、`concurrency`、`compatibility`、`Error Handling`、`resource management` 归一化为 `reliability`，保留测试和格式别名；未知类别仍被丢弃。程序在生成 fingerprint 前填充中文 `category_name`，覆盖模型提供的名称。控制台使用中文分类及英文严重程度（critical/high/medium/low），包括严重程度统计。Markdown 使用中文分类及严重程度标签（严重、高、中、低），且不受正文语言设置影响；JSON ID 和质量门禁使用英文。历史报告不重写，类别归一化变化可能改变 fingerprint。示例中的 `R1` 是当次审查的临时编号；多个规则可通过 `rule_ids` 数组提交。最终报告的 `matched_rules` 列出全部已验证的规则；兼容字段 `rule_id`、`rule_name` 指向列表中的第一条。
 
 完成定位后，先校验 finding 并生成 fingerprint，再交给 Review Filter。过滤器会分别看到同指纹候选的证据，只能删除被 diff 直接证伪的候选。随后合并幸存的重复问题，仅保留同指纹幸存候选的规则归属。在输出语言不是 English 时，再使用独立的无工具 Localization Prompt 批量本地化 `title`、`problem`、`evidence` 和 `suggestion`；当所有人类可读字段已经使用请求的中文文字时跳过这次重复请求。Fingerprint 保留原始措辞，避免相同问题因译文不同而无法去重。本地化只能按候选 ID 改写人类可读字段，不能修改文件、行号、severity、category、confidence 或 finding 数量。Filter 和 Localization 接受裸数组及有限的常见包装对象；响应非法时追加严格格式提示重试一次。`finish_reason=length` 会被明确报告为输出截断，截断内容不会回放到重试上下文。重试后仍失败则保留原 finding、记录 warning，并将审查标记为不完整。
 

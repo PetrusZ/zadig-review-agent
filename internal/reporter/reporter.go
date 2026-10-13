@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/koderover/zadig-review-agent/internal/agent"
+	"github.com/koderover/zadig-review-agent/internal/version"
 )
 
 func Write(report agent.Report, jsonPath, markdownPath string, console io.Writer, consoleMode string) error {
@@ -72,7 +73,7 @@ func ConsoleHeader(report agent.Report) string {
 	if report.Metadata.Commit != "" {
 		fmt.Fprintf(&b, " commit=%s", report.Metadata.Commit)
 	}
-	fmt.Fprintf(&b, " head=%s protocol=%s model=%s language=%s\n", short(report.Metadata.Head), report.Metadata.Protocol, report.Metadata.Model, report.Metadata.Language)
+	fmt.Fprintf(&b, " head=%s protocol=%s model=%s language=%s version=%q\n", short(report.Metadata.Head), report.Metadata.Protocol, report.Metadata.Model, report.Metadata.Language, version.String())
 	fmt.Fprintf(&b, "Changed files: %d, chunks: %d, excluded: %d\n", report.Stats.ChangedFiles, report.Stats.Chunks, len(report.ExcludedFiles))
 	b.WriteByte('\n')
 	return b.String()
@@ -108,7 +109,7 @@ func ConsoleResult(report agent.Report, mode string) string {
 	}
 	for _, sev := range []string{"critical", "high", "medium", "low"} {
 		if n := report.Stats.BySeverity[sev]; n > 0 {
-			fmt.Fprintf(&b, "%s: %d\n", agent.SeverityName(sev), n)
+			fmt.Fprintf(&b, "%s: %d\n", sev, n)
 		}
 	}
 	if mode == "summary" {
@@ -117,7 +118,7 @@ func ConsoleResult(report agent.Report, mode string) string {
 	}
 	for _, finding := range report.Findings {
 		fmt.Fprintf(&b, "\n─── %s:%d-%d ───\n", finding.File, finding.StartLine, finding.EndLine)
-		fmt.Fprintf(&b, "[%s · %s] **%s**\n\n", agent.CategoryName(finding.Category), agent.SeverityName(finding.Severity), finding.Title)
+		fmt.Fprintf(&b, "[%s · %s] **%s**\n\n", agent.CategoryName(finding.Category), finding.Severity, finding.Title)
 		labels := findingRuleLabels(finding, false)
 		if len(labels) == 0 {
 			b.WriteString("Rule: unattributed\n\n")

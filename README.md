@@ -160,7 +160,9 @@ zadig-review-agent rules check internal/reviewer/reviewer.go
 
 明确的格式、命名和编码约定违反归代码规范；有证据的修改困难归可维护性。资源泄漏导致耗尽归正确性与可靠性，多余分配归性能效率。CI 执行不可信代码归安全风险，缺失工具依赖归构建与交付。测试质量检查须有具体回归风险或明确规则要求，不能仅因没有测试就报告问题。
 
-JSON 保留英文 `category`，追加程序生成的 `category_name`；`severity` 和 `stats.by_severity` 继续使用英文值。控制台及 Markdown 的分类和严重程度固定以中文展示，不受正文语言设置影响：`critical` → 严重，`high` → 高，`medium` → 中，`low` → 低。
+JSON 保留英文 `category`，追加程序生成的 `category_name`；`severity` 和 `stats.by_severity` 继续使用英文值。控制台使用中文分类和英文严重程度（`critical/high/medium/low`）；Markdown 的分类和严重程度固定以中文展示，不受正文语言设置影响：`critical` → 严重，`high` → 高，`medium` → 中，`low` → 低。
+
+JSON 的 `stats.additions`、`stats.deletions` 和 `stats.changed_lines` 分别为新增、删除及两者合计的行数，零值也输出。替换一行计为删除一行加新增一行，即两行变更。统计覆盖全部变更文件，包括被审查过滤的文件和敏感文件；仅收集行数，不输出敏感内容。二进制文件不计行数，纯重命名计零。Range 模式统计 merge-base 到目标提交，commit 模式统计指定提交，workspace 模式包含未跟踪文件。`stats.changed_files` 仍仅统计通过审查过滤的文件。正式审查与 preview 使用相同口径；统计失败会报错或标记审查不完整，不能将其零值视为没有变更。
 
 ```json
 {"category":"reliability","category_name":"正确性与可靠性","severity":"high","title":"错误分支可能导致空指针访问"}

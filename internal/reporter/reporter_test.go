@@ -2,10 +2,14 @@ package reporter
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/koderover/zadig-review-agent/internal/agent"
+	"github.com/koderover/zadig-review-agent/internal/version"
 )
 
 func TestMarkdownIncludesFinding(t *testing.T) {
@@ -24,14 +28,14 @@ func TestMarkdownIncludesFinding(t *testing.T) {
 		t.Fatalf("console missing usage:\n%s", console)
 	}
 	detailed := Console(report, "detailed")
-	if !strings.Contains(detailed, "─── main.go:0-0 ───") || !strings.Contains(detailed, "[正确性与可靠性 · 高] **Bug**") {
+	if !strings.Contains(detailed, "─── main.go:0-0 ───") || !strings.Contains(detailed, "[正确性与可靠性 · high] **Bug**") {
 		t.Fatalf("console finding format is not grouped:\n%s", detailed)
 	}
 	if !strings.Contains(console, "excluded: 0\n\nReview result:") {
 		t.Fatalf("console sections must be separated by a blank line:\n%s", console)
 	}
 	start := ConsoleStart(report)
-	if !strings.Contains(start, "Code review:") || !strings.Contains(start, "Review process:") || strings.Contains(start, "Review result:") {
+	if !strings.Contains(start, "version="+strconv.Quote(version.String())) || !strings.Contains(start, "Code review:") || !strings.Contains(start, "Review process:") || strings.Contains(start, "Review result:") {
 		t.Fatalf("unexpected review start output:\n%s", start)
 	}
 	result := ConsoleResult(report, "summary")
@@ -67,7 +71,38 @@ func TestJSONIncludesEmptyCompressions(t *testing.T) {
 	}
 }
 
-func TestReportsUseChineseCategoryAndSeverityLabels(t *testing.T) {
+func TestJSONIncludesLineStats(t *testing.T) {
+	for _, stats := range []agent.Stats{{}, {Additions: 2, Deletions: 1, ChangedLines: 3}} {
+		path := filepath.Join(t.TempDir(), "report.json")
+		if err := Write(agent.Report{Stats: stats}, path, "", nil, "none"); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw["stats"], &fields); err != nil {
+			t.Fatal(err)
+		}
+		for name, want := range map[string]int{"additions": stats.Additions, "deletions": stats.Deletions, "changed_lines": stats.ChangedLines} {
+			value, ok := fields[name]
+			if !ok {
+				t.Fatalf("missing %s: %s", name, data)
+			}
+			var got int
+			if err := json.Unmarshal(value, &got); err != nil || got != want {
+				t.Fatalf("%s=%s want %d err=%v", name, value, want, err)
+			}
+		}
+	}
+}
+
+func TestReportsUseChineseLabelsAndEnglishConsoleSeverities(t *testing.T) {
 	for _, language := range []string{"zh-CN", "en-US"} {
 		for _, category := range []struct{ id, name string }{
 			{"style", "代码规范"}, {"reliability", "正确性与可靠性"},
@@ -88,8 +123,8 @@ func TestReportsUseChineseCategoryAndSeverityLabels(t *testing.T) {
 					if !strings.Contains(md, "- 分类："+category.name) || !strings.Contains(md, "### ["+severity.name+"] issue") || !strings.Contains(md, "- "+severity.name+": `1`") {
 						t.Fatalf("Markdown labels are not Chinese:\n%s", md)
 					}
-					if !strings.Contains(console, "["+category.name+" · "+severity.name+"]") || !strings.Contains(console, severity.name+": 1") || !strings.Contains(ConsoleResult(report, "summary"), severity.name+": 1") {
-						t.Fatalf("console labels are not Chinese:\n%s", console)
+					if !strings.Contains(console, "["+category.name+" · "+severity.id+"]") || !strings.Contains(console, severity.id+": 1") || !strings.Contains(ConsoleResult(report, "summary"), severity.id+": 1") {
+						t.Fatalf("console category or severity labels are incorrect:\n%s", console)
 					}
 					data, err := json.Marshal(report)
 					if err != nil {

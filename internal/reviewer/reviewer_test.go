@@ -117,7 +117,8 @@ func (f failLLM) Complete(context.Context, protocol.Request) (protocol.Response,
 }
 
 type fakeGit struct {
-	files []gitdiff.FileDiff
+	files    []gitdiff.FileDiff
+	statsErr error
 }
 
 func (f fakeGit) Head(context.Context) (string, error) {
@@ -126,6 +127,25 @@ func (f fakeGit) Head(context.Context) (string, error) {
 
 func (f fakeGit) Diff(context.Context, gitdiff.Request) ([]gitdiff.FileDiff, error) {
 	return f.files, nil
+}
+
+func (f fakeGit) DiffStats(context.Context, gitdiff.Request) (gitdiff.Stats, error) {
+	if f.statsErr != nil {
+		return gitdiff.Stats{}, f.statsErr
+	}
+	var stats gitdiff.Stats
+	for _, file := range f.files {
+		stats.Additions += file.Insertions
+		stats.Deletions += file.Deletions
+	}
+	return stats, nil
+}
+
+func TestRunnerDiffStatsFailureIsIncomplete(t *testing.T) {
+	report, err := (Runner{Config: config.Default(), Git: fakeGit{statsErr: errors.New("stats unavailable")}, LLM: failLLM{t}}).Run(context.Background())
+	if err != nil || !report.Incomplete || report.ExitCode != agent.ExitIncomplete || len(report.Errors) != 1 || !strings.Contains(report.Errors[0], "stats unavailable") {
+		t.Fatalf("stats failure was hidden: report=%+v err=%v", report, err)
+	}
 }
 
 type sequenceLLM struct {
@@ -170,7 +190,7 @@ func TestRunnerCountsFailedLLMRequest(t *testing.T) {
 	detail := report.Errors[0]
 	for _, want := range []string{
 		"llm request failed", "stage=review", `file="main.go"`, `agent_source="internal/reviewer/agent_loop.go:`, "round=1", "request_attempts=1",
-		"duration=", "configured_timeout=8m0s", "review_concurrency=4",
+		"duration=", "configured_timeout=10m0s", "review_concurrency=4",
 		"message_count=2", `tools="task_done,code_comment,file_read,code_search,changed_diff_read,file_find"`,
 		"require_tool=false", "estimated_tokens=", "protocol=openai", `model="configured-model"`, "timeout",
 	} {
@@ -1532,6 +1552,7 @@ func TestRunnerDropsUnresolvedRelocationWithoutFailingReview(t *testing.T) {
 
 func TestRunnerSkipsOversizedChunk(t *testing.T) {
 	file := reviewTestFile()
+	file.Insertions = 1
 	file.Hunks[0].Lines[0].Text = strings.Repeat("x", 4000)
 	cfg := config.Default()
 	cfg.Review.MaxChunkTokens = 1000
@@ -1542,6 +1563,9 @@ func TestRunnerSkipsOversizedChunk(t *testing.T) {
 	}
 	if report.Usage.LLMRequests != 0 || len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "token_threshold_exceeded") || !strings.Contains(report.Warnings[0], "estimated=") || !strings.Contains(report.Warnings[0], "limit=800") || report.ExitCode != agent.ExitIncomplete {
 		t.Fatalf("oversized chunk was not skipped: %+v", report)
+	}
+	if report.Stats.Additions != 1 || report.Stats.Deletions != 0 || report.Stats.ChangedLines != 1 {
+		t.Fatalf("incomplete review lost diff counts: %+v", report.Stats)
 	}
 }
 
@@ -1562,6 +1586,14 @@ func TestFileChunksSplitLargeHunk(t *testing.T) {
 		if len(chunk.Hunks) != 1 || len(chunk.Hunks[0].ChangedLines) == 0 {
 			t.Fatalf("chunk lost line mapping: %+v", chunk)
 		}
+	}
+	file.Insertions = 100
+	cfg := config.Default()
+	cfg.Review.MaxChunkTokens = 1000
+	cfg.Review.MaxTokensBudget = 1
+	report, err := (Runner{Config: cfg, Git: fakeGit{files: []gitdiff.FileDiff{file}}, LLM: failLLM{t: t}}).Run(context.Background())
+	if err != nil || !report.Incomplete || report.Stats.Chunks != len(chunks) || report.Stats.Additions != 100 || report.Stats.Deletions != 0 || report.Stats.ChangedLines != 100 {
+		t.Fatalf("chunking or budget stop changed diff counts: report=%+v err=%v", report, err)
 	}
 }
 

@@ -72,7 +72,7 @@ func runReview(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 	modelProtocol := fs.String("model-protocol", "", "model protocol: openai, gemini, anthropic")
 	modelName := fs.String("model-name", "", "model name")
 	modelEndpoint := fs.String("model-endpoint", "", "model endpoint")
-	modelTimeout := fs.String("model-timeout", "", "model timeout, e.g. 8m")
+	modelTimeout := fs.String("model-timeout", "", "model timeout, e.g. 10m")
 	jsonOut := fs.String("output-json", "", "json report path")
 	mdOut := fs.String("output-md", "", "markdown report path")
 	debug := fs.Bool("debug", false, "record full normalized LLM requests and responses (may contain source code)")
@@ -430,6 +430,10 @@ func previewReport(ctx context.Context, cfg config.Config, resolver rules.Resolv
 	if err != nil {
 		return agent.Report{}, err
 	}
+	lineStats, err := client.DiffStats(ctx, diffReq)
+	if err != nil {
+		return agent.Report{}, fmt.Errorf("git diff stats: %w", err)
+	}
 	blocked, err := client.BlockedContextPaths(ctx, diffReq)
 	if err != nil {
 		return agent.Report{}, fmt.Errorf("inspect sensitive paths: %w", err)
@@ -450,6 +454,9 @@ func previewReport(ctx context.Context, cfg config.Config, resolver rules.Resolv
 		},
 		Stats: agent.Stats{
 			ChangedFiles: len(filtered.Kept),
+			Additions:    lineStats.Additions,
+			Deletions:    lineStats.Deletions,
+			ChangedLines: lineStats.Additions + lineStats.Deletions,
 			Chunks:       len(filtered.Kept),
 			BySeverity:   map[string]int{},
 		},
